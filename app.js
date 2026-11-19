@@ -29,8 +29,9 @@
     ]
   };
 
-  const state = { tab: "crochet", tool: "select", selectedType: null, selectedId: null, items: [], cols: 40, rows: 25, zoom: 1, showGrid: true, snap: true, color: "#3b2e29", scale: 1, history: [], future: [], meta: {} };
+  const state = { tab: "crochet", tool: "select", selectedType: null, selectedId: null, items: [], cols: 40, rows: 25, zoom: 1, showGrid: true, snap: true, color: "#3b2e29", scale: 1, history: [], future: [], meta: {}, spacePan: false };
   let drag = null;
+  let pan = null;
   let saveTimer;
 
   function symbolDef(type) { return [...symbols.crochet, ...symbols.knit].find((s) => s.id === type); }
@@ -49,7 +50,7 @@
       const btn = document.createElement("button"); btn.className = `symbol-button${state.selectedType === symbol.id ? " selected" : ""}`;
       btn.innerHTML = `<svg viewBox="0 0 40 40" aria-hidden="true">${symbol.icon}</svg><small>${symbol.label}</small>`;
       btn.title = symbol.label;
-      btn.addEventListener("click", () => { state.tool = "place"; state.selectedType = symbol.id; state.selectedId = null; $("selectToolBtn").classList.remove("active-tool"); renderPalette(); render(); });
+      btn.addEventListener("click", () => { state.tool = "place"; state.selectedType = symbol.id; state.selectedId = null; renderPalette(); render(); });
       root.appendChild(btn);
     });
   }
@@ -68,7 +69,20 @@
     const selection = $("selectionLayer"); selection.innerHTML = "";
     const selected = state.items.find(i => i.id === state.selectedId);
     if (selected) { const size = 34 * (selected.scale || 1); selection.appendChild(makeSvg("rect", { class:"symbol-selection", x:selected.x-size/2, y:selected.y-size/2, width:size, height:size, rx:4, fill:"none", stroke:"#a6534d", "stroke-width":2, "stroke-dasharray":"5 3" })); }
-    $("symbolCount").textContent = `기호 ${state.items.length}개`; $("canvasSizeLabel").textContent = `${state.cols} × ${state.rows}칸`; $("zoomValue").textContent = `${Math.round(state.zoom*100)}%`; updateButtons();
+    $("symbolCount").textContent = `기호 ${state.items.length}개`; $("canvasSizeLabel").textContent = `${state.cols} × ${state.rows}칸`; $("zoomValue").textContent = `${Math.round(state.zoom*100)}%`;
+    $("selectToolBtn").classList.toggle("active-tool", state.tool === "select"); $("panToolBtn").classList.toggle("active-tool", state.tool === "pan");
+    $("canvasViewport").classList.toggle("pan-mode", state.tool === "pan" || state.spacePan); $("toolHint").textContent = state.tool === "pan" ? "✋ 끌어서 화면 이동" : state.tool === "place" ? "＋ 격자를 눌러 기호 배치" : "↖ 기호 선택·이동"; updateButtons();
+  }
+
+  function setZoom(next, anchor = null) {
+    const viewport = $("canvasViewport"); const oldZoom = state.zoom; const beforeX = anchor ? viewport.scrollLeft + anchor.x : 0; const beforeY = anchor ? viewport.scrollTop + anchor.y : 0;
+    state.zoom = Math.max(.35, Math.min(2.2, next)); render();
+    if (anchor) { const ratio = state.zoom / oldZoom; viewport.scrollLeft = beforeX * ratio - anchor.x; viewport.scrollTop = beforeY * ratio - anchor.y; }
+  }
+  function fitCanvas() {
+    const viewport = $("canvasViewport"); const baseWidth = state.cols * CELL * .75; const baseHeight = state.rows * CELL * .75;
+    const next = Math.min((viewport.clientWidth - 76) / baseWidth, (viewport.clientHeight - 76) / baseHeight, 1.35);
+    setZoom(next); requestAnimationFrame(() => { viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2); viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2); });
   }
 
   function svgPoint(evt) { const svg = $("patternCanvas"), p = svg.createSVGPoint(); p.x = evt.clientX; p.y = evt.clientY; const out = p.matrixTransform(svg.getScreenCTM().inverse()); const snap = (n) => state.snap ? Math.round(n/CELL)*CELL : n; return { x: Math.max(0, Math.min(state.cols*CELL, snap(out.x))), y: Math.max(0, Math.min(state.rows*CELL, snap(out.y))) }; }
@@ -90,6 +104,7 @@
   function syncControls(){ $("gridCols").value=state.cols; $("gridRows").value=state.rows; $("showGrid").checked=state.showGrid; $("snapGrid").checked=state.snap; }
 
   $("patternCanvas").addEventListener("pointerdown", (evt) => {
+    if(state.tool === "pan" || state.spacePan || evt.button === 1) return;
     const item=itemFromTarget(evt.target), point=svgPoint(evt);
     if(state.tool==="place"&&state.selectedType){addItem(point);return}
     if(item){state.selectedId=item.id;drag={id:item.id,start:point,ox:item.x,oy:item.y};$("patternCanvas").setPointerCapture(evt.pointerId)}else state.selectedId=null;render();
@@ -97,12 +112,23 @@
   $("patternCanvas").addEventListener("pointermove", (evt)=>{if(!drag)return;const item=state.items.find(i=>i.id===drag.id),p=svgPoint(evt);item.x=Math.max(0,Math.min(state.cols*CELL,drag.ox+p.x-drag.start.x));item.y=Math.max(0,Math.min(state.rows*CELL,drag.oy+p.y-drag.start.y));render()});
   $("patternCanvas").addEventListener("pointerup", ()=>{if(drag){state.history.push(JSON.stringify({items:state.items.map(i=>i.id===drag.id?{...i,x:drag.ox,y:drag.oy}:i),cols:state.cols,rows:state.rows}));state.future=[];drag=null;scheduleSave();updateButtons()}});
 
+  $("canvasViewport").addEventListener("pointerdown", (evt) => {
+    if (!(state.tool === "pan" || state.spacePan || evt.button === 1)) return;
+    evt.preventDefault(); const viewport = $("canvasViewport"); pan = { pointerId:evt.pointerId, x:evt.clientX, y:evt.clientY, left:viewport.scrollLeft, top:viewport.scrollTop };
+    viewport.classList.add("panning"); viewport.setPointerCapture(evt.pointerId);
+  }, true);
+  $("canvasViewport").addEventListener("pointermove", (evt) => { if(!pan || pan.pointerId !== evt.pointerId) return; const viewport=$("canvasViewport"); viewport.scrollLeft=pan.left-(evt.clientX-pan.x); viewport.scrollTop=pan.top-(evt.clientY-pan.y); });
+  function endPan(evt){ if(!pan || (evt.pointerId !== undefined && pan.pointerId !== evt.pointerId)) return; pan=null; $("canvasViewport").classList.remove("panning"); }
+  $("canvasViewport").addEventListener("pointerup", endPan); $("canvasViewport").addEventListener("pointercancel", endPan);
+  $("canvasViewport").addEventListener("wheel", (evt) => { if(!(evt.ctrlKey || evt.metaKey)) return; evt.preventDefault(); const rect=$("canvasViewport").getBoundingClientRect(); setZoom(state.zoom + (evt.deltaY < 0 ? .1 : -.1), {x:evt.clientX-rect.left,y:evt.clientY-rect.top}); }, {passive:false});
+
   document.querySelectorAll(".tab").forEach(btn=>btn.addEventListener("click",()=>{state.tab=btn.dataset.tab;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b===btn));renderPalette()}));
-  $("selectToolBtn").addEventListener("click",()=>{state.tool="select";state.selectedType=null;$("selectToolBtn").classList.add("active-tool");renderPalette();render()});
+  $("selectToolBtn").addEventListener("click",()=>{state.tool="select";state.selectedType=null;renderPalette();render()});
+  $("panToolBtn").addEventListener("click",()=>{state.tool="pan";state.selectedType=null;state.selectedId=null;renderPalette();render()});
   $("symbolColor").addEventListener("input",e=>{state.color=e.target.value;const item=state.items.find(i=>i.id===state.selectedId);if(item){checkpoint();item.color=state.color;render();scheduleSave()}});
   $("symbolScale").addEventListener("input",e=>{state.scale=Number(e.target.value)/100;const item=state.items.find(i=>i.id===state.selectedId);if(item){item.scale=state.scale;render();scheduleSave()}});
   $("undoBtn").onclick=undo; $("redoBtn").onclick=redo; $("deleteBtn").onclick=deleteSelected; $("duplicateBtn").onclick=duplicateSelected; $("rotateBtn").onclick=rotateSelected;
-  $("zoomInBtn").onclick=()=>{state.zoom=Math.min(1.8,state.zoom+.1);render()}; $("zoomOutBtn").onclick=()=>{state.zoom=Math.max(.5,state.zoom-.1);render()};
+  $("zoomInBtn").onclick=()=>setZoom(state.zoom+.1); $("zoomOutBtn").onclick=()=>setZoom(state.zoom-.1); $("fitBtn").onclick=fitCanvas;
   $("gridCols").addEventListener("change",e=>{checkpoint();state.cols=Math.max(10,Math.min(80,Number(e.target.value)||40));render();scheduleSave()});
   $("gridRows").addEventListener("change",e=>{checkpoint();state.rows=Math.max(10,Math.min(60,Number(e.target.value)||25));render();scheduleSave()});
   $("showGrid").addEventListener("change",e=>{state.showGrid=e.target.checked;render();scheduleSave()}); $("snapGrid").addEventListener("change",e=>{state.snap=e.target.checked;scheduleSave()});
@@ -110,7 +136,8 @@
   $("saveBtn").onclick=()=>{save();toast("현재 도안을 저장했습니다")}; $("exportJsonBtn").onclick=exportJson; $("exportPngBtn").onclick=exportPng; $("printBtn").onclick=()=>{state.selectedId=null;render();window.print()};
   $("importJsonInput").addEventListener("change",async e=>{try{const data=JSON.parse(await e.target.files[0].text());applyData(data);save();toast("도안을 불러왔습니다")}catch{toast("올바른 도안 파일이 아닙니다")}e.target.value=""});
   $("newBtn").onclick=()=>{if(!confirm("현재 도안을 지우고 새 도안을 만들까요? JSON 백업을 권장합니다."))return;checkpoint();state.items=[];state.selectedId=null;$("projectTitle").value="새 도안";render();save();toast("새 도안을 시작합니다")};
-  document.addEventListener("keydown",e=>{if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName))return;if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(e.key==="Delete"||e.key==="Backspace")deleteSelected();else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="d"){e.preventDefault();duplicateSelected()}else if(e.key==="Escape"){$("selectToolBtn").click()}});
+  document.addEventListener("keydown",e=>{if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName))return;if(e.code==="Space"){e.preventDefault();if(!state.spacePan){state.spacePan=true;render()}return}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(e.key==="Delete"||e.key==="Backspace")deleteSelected();else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="d"){e.preventDefault();duplicateSelected()}else if(e.key==="Escape"){$("selectToolBtn").click()}else if(e.key==="0")fitCanvas()});
+  document.addEventListener("keyup",e=>{if(e.code==="Space"&&state.spacePan){state.spacePan=false;endPan({});render()}}); window.addEventListener("blur",()=>{state.spacePan=false;endPan({});render()});
 
-  const saved=localStorage.getItem(STORAGE_KEY); if(saved){try{applyData(JSON.parse(saved))}catch{render()}}else render(); renderPalette(); updateButtons();
+  const saved=localStorage.getItem(STORAGE_KEY); if(saved){try{applyData(JSON.parse(saved))}catch{render()}}else render(); renderPalette(); updateButtons(); requestAnimationFrame(fitCanvas);
 })();
