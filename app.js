@@ -29,7 +29,7 @@
     ]
   };
 
-  const state = { tab: "crochet", tool: "select", selectedType: null, selectedId: null, items: [], cols: 40, rows: 25, zoom: 1, showGrid: true, snap: true, color: "#3b2e29", scale: 1, history: [], future: [], meta: {}, spacePan: false };
+  const state = { tab: "crochet", tool: "select", selectedType: null, selectedId: null, items: [], cols: 40, rows: 25, zoom: 1, showGrid: true, snap: true, color: "#3b2e29", scale: 1, history: [], future: [], meta: {}, spacePan: false, circle: null };
   let drag = null;
   let pan = null;
   let saveTimer;
@@ -42,7 +42,7 @@
   function restore(raw) { const data = JSON.parse(raw); state.items = data.items || []; state.cols = data.cols || 40; state.rows = data.rows || 25; syncControls(); render(); scheduleSave(); }
   function undo() { if (!state.history.length) return; state.future.push(snapshot()); restore(state.history.pop()); updateButtons(); }
   function redo() { if (!state.future.length) return; state.history.push(snapshot()); restore(state.future.pop()); updateButtons(); }
-  function updateButtons() { $("undoBtn").disabled = !state.history.length; $("redoBtn").disabled = !state.future.length; const noSelection = !state.selectedId; ["duplicateBtn","rotateBtn","deleteBtn"].forEach(id => $(id).disabled = noSelection); }
+  function updateButtons() { $("undoBtn").disabled = !state.history.length; $("redoBtn").disabled = !state.future.length; const noSelection = !state.selectedId; ["duplicateBtn","rotateBtn","deleteBtn"].forEach(id => $(id).disabled = noSelection); $("circleToolBtn").disabled = state.tab !== "crochet" || !state.selectedType; }
 
   function renderPalette() {
     const root = $("symbolPalette"); root.innerHTML = "";
@@ -70,8 +70,8 @@
     const selected = state.items.find(i => i.id === state.selectedId);
     if (selected) { const size = 34 * (selected.scale || 1); selection.appendChild(makeSvg("rect", { class:"symbol-selection", x:selected.x-size/2, y:selected.y-size/2, width:size, height:size, rx:4, fill:"none", stroke:"#a6534d", "stroke-width":2, "stroke-dasharray":"5 3" })); }
     $("symbolCount").textContent = `기호 ${state.items.length}개`; $("canvasSizeLabel").textContent = `${state.cols} × ${state.rows}칸`; $("zoomValue").textContent = `${Math.round(state.zoom*100)}%`;
-    $("selectToolBtn").classList.toggle("active-tool", state.tool === "select"); $("panToolBtn").classList.toggle("active-tool", state.tool === "pan");
-    $("canvasViewport").classList.toggle("pan-mode", state.tool === "pan" || state.spacePan); $("toolHint").textContent = state.tool === "pan" ? "✋ 끌어서 화면 이동" : state.tool === "place" ? "＋ 격자를 눌러 기호 배치" : "↖ 기호 선택·이동"; updateButtons();
+    $("selectToolBtn").classList.toggle("active-tool", state.tool === "select"); $("panToolBtn").classList.toggle("active-tool", state.tool === "pan"); $("circleToolBtn").classList.toggle("active-tool", state.tool === "circle");
+    $("canvasViewport").classList.toggle("pan-mode", state.tool === "pan" || state.spacePan); $("canvasViewport").classList.toggle("circle-mode", state.tool === "circle"); $("toolHint").textContent = state.tool === "pan" ? "✋ 끌어서 화면 이동" : state.tool === "circle" ? "◯ 원의 중심점을 눌러 배치" : state.tool === "place" ? "＋ 격자를 눌러 기호 배치" : "↖ 기호 선택·이동"; updateButtons();
   }
 
   function setZoom(next, anchor = null) {
@@ -88,6 +88,24 @@
   function svgPoint(evt) { const svg = $("patternCanvas"), p = svg.createSVGPoint(); p.x = evt.clientX; p.y = evt.clientY; const out = p.matrixTransform(svg.getScreenCTM().inverse()); const snap = (n) => state.snap ? Math.round(n/CELL)*CELL : n; return { x: Math.max(0, Math.min(state.cols*CELL, snap(out.x))), y: Math.max(0, Math.min(state.rows*CELL, snap(out.y))) }; }
   function itemFromTarget(target) { const group = target.closest?.("[data-id]"); return group ? state.items.find(i => i.id === group.dataset.id) : null; }
   function addItem(point) { checkpoint(); const item = { id:uid(), type:state.selectedType, x:point.x, y:point.y, rotation:0, color:state.color, scale:state.scale }; state.items.push(item); state.selectedId = item.id; render(); scheduleSave(); }
+  function addCircle(center) {
+    if (!state.circle || !state.selectedType) return;
+    checkpoint();
+    const { count, radiusCells, startAngle, rotateAlongCircle } = state.circle;
+    const radius = radiusCells * CELL;
+    const maxX = state.cols * CELL, maxY = state.rows * CELL;
+    const created = [];
+    for (let index = 0; index < count; index += 1) {
+      const angle = startAngle + (360 / count) * index;
+      const radians = angle * Math.PI / 180;
+      const x = center.x + Math.cos(radians) * radius;
+      const y = center.y + Math.sin(radians) * radius;
+      if (x < 0 || x > maxX || y < 0 || y > maxY) continue;
+      created.push({ id:uid(), type:state.selectedType, x, y, rotation:rotateAlongCircle ? angle + 90 : 0, color:state.color, scale:state.scale });
+    }
+    state.items.push(...created); state.selectedId = null; state.tool = "select"; state.circle = null; render(); scheduleSave();
+    toast(created.length === count ? `${count}개 기호를 원형으로 배치했습니다` : `도안 밖을 제외하고 ${created.length}개를 배치했습니다`);
+  }
   function deleteSelected() { if (!state.selectedId) return; checkpoint(); state.items = state.items.filter(i => i.id !== state.selectedId); state.selectedId = null; render(); scheduleSave(); }
   function duplicateSelected() { const original = state.items.find(i => i.id === state.selectedId); if (!original) return; checkpoint(); const copy = {...original, id:uid(), x:Math.min(original.x+CELL,state.cols*CELL), y:Math.min(original.y+CELL,state.rows*CELL)}; state.items.push(copy); state.selectedId=copy.id; render(); scheduleSave(); }
   function rotateSelected() { const item=state.items.find(i=>i.id===state.selectedId); if(!item)return; checkpoint(); item.rotation=(item.rotation+45)%360; render(); scheduleSave(); }
@@ -106,6 +124,7 @@
   $("patternCanvas").addEventListener("pointerdown", (evt) => {
     if(state.tool === "pan" || state.spacePan || evt.button === 1) return;
     const item=itemFromTarget(evt.target), point=svgPoint(evt);
+    if(state.tool==="circle"){addCircle(point);return}
     if(state.tool==="place"&&state.selectedType){addItem(point);return}
     if(item){state.selectedId=item.id;drag={id:item.id,start:point,ox:item.x,oy:item.y};$("patternCanvas").setPointerCapture(evt.pointerId)}else state.selectedId=null;render();
   });
@@ -125,6 +144,9 @@
   document.querySelectorAll(".tab").forEach(btn=>btn.addEventListener("click",()=>{state.tab=btn.dataset.tab;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b===btn));renderPalette()}));
   $("selectToolBtn").addEventListener("click",()=>{state.tool="select";state.selectedType=null;renderPalette();render()});
   $("panToolBtn").addEventListener("click",()=>{state.tool="pan";state.selectedType=null;state.selectedId=null;renderPalette();render()});
+  $("circleToolBtn").addEventListener("click",()=>{const def=symbolDef(state.selectedType);if(!def||state.tab!=="crochet")return;$("circleSymbolLabel").textContent=def.label;$("circleDialog").showModal()});
+  $("circleForm").addEventListener("submit",e=>{e.preventDefault();const count=Math.max(2,Math.min(60,Number($("circleCount").value)||8));const radiusCells=Math.max(1,Math.min(20,Number($("circleRadius").value)||3));const startAngle=Math.max(-360,Math.min(360,Number($("circleAngle").value)||-90));state.circle={count,radiusCells,startAngle,rotateAlongCircle:$("circleRotate").checked};state.tool="circle";state.selectedId=null;$("circleDialog").close();render();toast("도안에서 원의 중심점을 눌러주세요")});
+  ["circleCancelBtn","circleCancelX"].forEach(id=>$(id).addEventListener("click",()=>$("circleDialog").close()));
   $("symbolColor").addEventListener("input",e=>{state.color=e.target.value;const item=state.items.find(i=>i.id===state.selectedId);if(item){checkpoint();item.color=state.color;render();scheduleSave()}});
   $("symbolScale").addEventListener("input",e=>{state.scale=Number(e.target.value)/100;const item=state.items.find(i=>i.id===state.selectedId);if(item){item.scale=state.scale;render();scheduleSave()}});
   $("undoBtn").onclick=undo; $("redoBtn").onclick=redo; $("deleteBtn").onclick=deleteSelected; $("duplicateBtn").onclick=duplicateSelected; $("rotateBtn").onclick=rotateSelected;
