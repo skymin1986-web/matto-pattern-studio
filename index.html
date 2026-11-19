@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#6f5141" />
+  <title>matto Pattern Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">m</span>
+      <div><strong>matto</strong><small>PATTERN STUDIO</small></div>
+    </div>
+    <div class="toolbar" aria-label="편집 도구">
+      <button id="undoBtn" title="실행 취소 (⌘/Ctrl+Z)">↶ <span>취소</span></button>
+      <button id="redoBtn" title="다시 실행 (⌘/Ctrl+Shift+Z)">↷ <span>다시</span></button>
+      <button id="duplicateBtn" title="선택 기호 복제">⧉ <span>복제</span></button>
+      <button id="rotateBtn" title="선택 기호 45° 회전">↻ <span>회전</span></button>
+      <button id="deleteBtn" class="danger" title="선택 기호 삭제">⌫ <span>삭제</span></button>
+    </div>
+    <div class="toolbar primary-actions">
+      <button id="saveBtn">저장</button>
+      <button id="exportPngBtn" class="accent">PNG</button>
+      <button id="printBtn" class="accent">PDF</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="panel palette-panel">
+      <section>
+        <p class="eyebrow">SYMBOLS</p>
+        <h2>뜨개 기호</h2>
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="crochet">코바늘</button>
+          <button class="tab" data-tab="knit">대바늘</button>
+        </div>
+        <div id="symbolPalette" class="symbol-grid"></div>
+      </section>
+      <section class="palette-options">
+        <label>기호 색상<input id="symbolColor" type="color" value="#3b2e29" /></label>
+        <label>기호 크기<input id="symbolScale" type="range" min="55" max="145" value="100" /></label>
+        <button id="selectToolBtn" class="wide active-tool">↖ 선택·이동 도구</button>
+      </section>
+      <div class="tip"><strong>사용법</strong><br />기호를 고른 뒤 격자를 누르세요. 선택 도구에서는 기호를 끌어 이동할 수 있습니다.</div>
+    </aside>
+
+    <section class="canvas-column">
+      <div class="document-head">
+        <div>
+          <input id="projectTitle" class="title-input" value="나의 첫 도안" aria-label="도안 이름" />
+          <p id="saveStatus">브라우저에 자동 저장됩니다</p>
+        </div>
+        <div class="zoom-controls">
+          <button id="zoomOutBtn">−</button><output id="zoomValue">100%</output><button id="zoomInBtn">＋</button>
+        </div>
+      </div>
+      <div id="canvasViewport" class="canvas-viewport">
+        <svg id="patternCanvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="뜨개 도안 편집 영역">
+          <defs>
+            <pattern id="smallGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#ded7ce" stroke-width="1" />
+            </pattern>
+            <pattern id="bigGrid" width="160" height="160" patternUnits="userSpaceOnUse">
+              <rect width="160" height="160" fill="url(#smallGrid)" />
+              <path d="M 160 0 L 0 0 0 160" fill="none" stroke="#bdb2a7" stroke-width="1.5" />
+            </pattern>
+          </defs>
+          <rect id="paper" x="0" y="0" width="1280" height="800" rx="2" fill="#fffdf9" />
+          <rect id="gridLayer" x="0" y="0" width="1280" height="800" fill="url(#bigGrid)" />
+          <g id="symbolsLayer"></g>
+          <g id="selectionLayer" pointer-events="none"></g>
+        </svg>
+      </div>
+      <div class="statusbar">
+        <span id="symbolCount">기호 0개</span><span>자동 격자 맞춤</span><span id="canvasSizeLabel">40 × 25칸</span>
+      </div>
+    </section>
+
+    <aside class="panel settings-panel">
+      <section>
+        <p class="eyebrow">PROJECT</p><h2>도안 정보</h2>
+        <label>작품명<input id="metaName" value="배색 목도리" /></label>
+        <label>실 / 재료<input id="metaYarn" placeholder="예: 울 80%, 나일론 20%" /></label>
+        <div class="split"><label>바늘 호수<input id="metaNeedle" placeholder="5 mm" /></label><label>게이지<input id="metaGauge" placeholder="10 × 10 cm" /></label></div>
+        <label>메모<textarea id="metaNotes" rows="3" placeholder="수강생에게 전달할 설명을 입력하세요."></textarea></label>
+      </section>
+      <section>
+        <p class="eyebrow">CANVAS</p><h2>격자 설정</h2>
+        <div class="split"><label>가로 칸<input id="gridCols" type="number" min="10" max="80" value="40" /></label><label>세로 칸<input id="gridRows" type="number" min="10" max="60" value="25" /></label></div>
+        <label class="check"><input id="showGrid" type="checkbox" checked /> 격자 표시</label>
+        <label class="check"><input id="snapGrid" type="checkbox" checked /> 격자에 맞추기</label>
+      </section>
+      <section>
+        <p class="eyebrow">FILE</p><h2>불러오기·내보내기</h2>
+        <div class="stack">
+          <button id="exportJsonBtn">JSON 백업 내려받기</button>
+          <label class="file-button">JSON 백업 불러오기<input id="importJsonInput" type="file" accept="application/json" /></label>
+          <button id="newBtn" class="subtle">새 도안 만들기</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
