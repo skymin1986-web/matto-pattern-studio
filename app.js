@@ -148,7 +148,18 @@
   function download(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
   function safeName(){return (($("projectTitle").value||"matto-pattern").trim().replace(/[^0-9a-zA-Z가-힣_-]+/g,"-")||"matto-pattern")}
   function exportJson(){download(new Blob([JSON.stringify(collectData(),null,2)],{type:"application/json"}),`${safeName()}.json`);toast("JSON 백업을 저장했습니다")}
-  function exportPng(){ state.selectedId=null; render(); const svg=$("patternCanvas").cloneNode(true); ["paper","gridLayer","selectionLayer"].forEach(id=>svg.querySelector(`#${id}`)?.remove()); svg.setAttribute("width",state.cols*CELL); svg.setAttribute("height",state.rows*CELL); const source=new XMLSerializer().serializeToString(svg); const img=new Image(); img.onload=()=>{const canvas=document.createElement("canvas");canvas.width=state.cols*CELL*2;canvas.height=state.rows*CELL*2;const ctx=canvas.getContext("2d");ctx.scale(2,2);ctx.drawImage(img,0,0);canvas.toBlob(blob=>download(blob,`${safeName()}.png`),"image/png")};img.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;toast("격자 없이 PNG를 만드는 중입니다")}
+  function exportSvgSource(){
+    state.selectedId=null; render();
+    const svg=$("patternCanvas").cloneNode(true);
+    ["paper","gridLayer","selectionLayer"].forEach(id=>svg.querySelector(`#${id}`)?.remove());
+    svg.querySelectorAll("[cursor]").forEach(el=>el.removeAttribute("cursor"));
+    svg.setAttribute("xmlns",NS); svg.setAttribute("width",state.cols*CELL); svg.setAttribute("height",state.rows*CELL);
+    const symbols=svg.querySelector("#symbolsLayer");
+    if(symbols){symbols.setAttribute("aria-label","matto knitting symbols");symbols.querySelectorAll(":scope > g").forEach((group,index)=>group.setAttribute("id",`symbol-${index+1}`))}
+    return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(svg)}`;
+  }
+  function exportSvg(){download(new Blob([exportSvgSource()],{type:"image/svg+xml;charset=utf-8"}),`${safeName()}.svg`);toast("Illustrator용 SVG 벡터를 저장했습니다")}
+  function exportPng(){ const source=exportSvgSource(); const img=new Image(); img.onload=()=>{const canvas=document.createElement("canvas");canvas.width=state.cols*CELL*2;canvas.height=state.rows*CELL*2;const ctx=canvas.getContext("2d");ctx.scale(2,2);ctx.drawImage(img,0,0);canvas.toBlob(blob=>download(blob,`${safeName()}.png`),"image/png")};img.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;toast("격자 없이 PNG를 만드는 중입니다")}
   function toast(msg){const el=$("toast");el.textContent=msg;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),1800)}
   function syncControls(){ $("gridCols").value=state.cols; $("gridRows").value=state.rows; $("showGrid").checked=state.showGrid; $("snapGrid").checked=state.snap; }
 
@@ -225,7 +236,7 @@
   $("gridRows").addEventListener("change",e=>{checkpoint();state.rows=Math.max(10,Math.min(60,Number(e.target.value)||25));render();scheduleSave()});
   $("showGrid").addEventListener("change",e=>{state.showGrid=e.target.checked;render();scheduleSave()}); $("snapGrid").addEventListener("change",e=>{state.snap=e.target.checked;scheduleSave()});
   ["projectTitle","metaName","metaYarn","metaNeedle","metaGauge","metaNotes"].forEach(id=>$(id).addEventListener("input",scheduleSave));
-  $("saveBtn").onclick=()=>{save();toast("현재 도안을 저장했습니다")}; $("exportJsonBtn").onclick=exportJson; $("exportPngBtn").onclick=exportPng; $("printBtn").onclick=()=>{state.selectedId=null;render();window.print()};
+  $("saveBtn").onclick=()=>{save();toast("현재 도안을 저장했습니다")}; $("exportJsonBtn").onclick=exportJson; $("exportSvgBtn").onclick=exportSvg; $("exportPngBtn").onclick=exportPng; $("printBtn").onclick=()=>{state.selectedId=null;render();window.print()};
   $("importJsonInput").addEventListener("change",async e=>{try{const data=JSON.parse(await e.target.files[0].text());applyData(data);save();toast("도안을 불러왔습니다")}catch{toast("올바른 도안 파일이 아닙니다")}e.target.value=""});
   $("newBtn").onclick=()=>{if(!confirm("현재 도안을 지우고 새 도안을 만들까요? JSON 백업을 권장합니다."))return;checkpoint();state.items=[];state.selectedId=null;$("projectTitle").value="새 도안";render();save();toast("새 도안을 시작합니다")};
   document.addEventListener("keydown",e=>{if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName))return;if(e.code==="Space"){e.preventDefault();if(!state.spacePan){state.spacePan=true;render()}return}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(e.key==="Delete"||e.key==="Backspace")deleteSelected();else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="d"){e.preventDefault();duplicateSelected()}else if(e.key==="Escape"){$("selectToolBtn").click()}else if(e.key==="0")fitCanvas()});
