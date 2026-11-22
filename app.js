@@ -158,7 +158,18 @@
     if(symbols){symbols.setAttribute("aria-label","matto knitting symbols");symbols.querySelectorAll(":scope > g").forEach((group,index)=>group.setAttribute("id",`symbol-${index+1}`))}
     return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(svg)}`;
   }
-  function exportSvg(){download(new Blob([exportSvgSource()],{type:"image/svg+xml;charset=utf-8"}),`${safeName()}.svg`);toast("Illustrator용 SVG 벡터를 저장했습니다")}
+  async function exportSvg(){
+    const source=exportSvgSource(), name=`${safeName()}.svg`;
+    if(isMobileMode() && typeof File!=="undefined" && navigator.canShare && navigator.share){
+      const file=new File([source],name,{type:"application/octet-stream"});
+      if(navigator.canShare({files:[file]})){
+        try{await navigator.share({files:[file],title:name});toast("SVG 저장·공유 창을 열었습니다");return}
+        catch(error){if(error?.name==="AbortError")return}
+      }
+    }
+    const type=isMobileMode()?"application/octet-stream":"image/svg+xml;charset=utf-8";
+    download(new Blob([source],{type}),name);toast("Illustrator용 SVG 벡터를 저장했습니다")
+  }
   function exportPng(){ const source=exportSvgSource(); const img=new Image(); img.onload=()=>{const canvas=document.createElement("canvas");canvas.width=state.cols*CELL*2;canvas.height=state.rows*CELL*2;const ctx=canvas.getContext("2d");ctx.scale(2,2);ctx.drawImage(img,0,0);canvas.toBlob(blob=>download(blob,`${safeName()}.png`),"image/png")};img.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;toast("격자 없이 PNG를 만드는 중입니다")}
   function toast(msg){const el=$("toast");el.textContent=msg;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),1800)}
   function syncControls(){ $("gridCols").value=state.cols; $("gridRows").value=state.rows; $("showGrid").checked=state.showGrid; $("snapGrid").checked=state.snap; }
