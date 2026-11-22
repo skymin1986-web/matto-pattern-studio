@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#6f5141" />
   <title>matto Pattern Studio</title>
-  <link rel="stylesheet" href="styles.css?v=1.2" />
+  <link rel="stylesheet" href="styles.css?v=1.3" />
 </head>
 <body>
   <header class="topbar">
@@ -13,6 +13,14 @@
       <span class="brand-mark">m</span>
       <div><strong>matto</strong><small>PATTERN STUDIO</small></div>
     </div>
+    <label class="layout-switch" title="화면 구성을 선택합니다">
+      <span>화면</span>
+      <select id="layoutMode" aria-label="화면 모드">
+        <option value="auto">자동</option>
+        <option value="desktop">PC</option>
+        <option value="mobile">모바일</option>
+      </select>
+    </label>
     <div class="toolbar" aria-label="편집 도구">
       <button id="undoBtn" title="실행 취소 (⌘/Ctrl+Z)">↶ <span>취소</span></button>
       <button id="redoBtn" title="다시 실행 (⌘/Ctrl+Shift+Z)">↷ <span>다시</span></button>
@@ -28,7 +36,8 @@
   </header>
 
   <main class="workspace">
-    <aside class="panel palette-panel">
+    <aside id="palettePanel" class="panel palette-panel mobile-sheet" aria-label="기호 선택 패널">
+      <div class="mobile-sheet-head"><strong>기호와 도구</strong><button type="button" class="sheet-close" data-close-sheet aria-label="닫기">×</button></div>
       <section>
         <p class="eyebrow">SYMBOLS</p>
         <h2>뜨개 기호</h2>
@@ -82,7 +91,8 @@
       </div>
     </section>
 
-    <aside class="panel settings-panel">
+    <aside id="settingsPanel" class="panel settings-panel mobile-sheet" aria-label="도안 설정 패널">
+      <div class="mobile-sheet-head"><strong>도안 정보와 파일</strong><button type="button" class="sheet-close" data-close-sheet aria-label="닫기">×</button></div>
       <section>
         <p class="eyebrow">PROJECT</p><h2>도안 정보</h2>
         <label>작품명<input id="metaName" value="배색 목도리" /></label>
@@ -107,6 +117,16 @@
     </aside>
   </main>
 
+  <div id="sheetBackdrop" class="sheet-backdrop" aria-hidden="true"></div>
+  <nav class="mobile-dock" aria-label="모바일 편집 도구">
+    <button type="button" data-open-sheet="palette"><span>＋</span><small>기호</small></button>
+    <button type="button" id="mobileSelectBtn"><span>↖</span><small>선택</small></button>
+    <button type="button" id="mobilePanBtn"><span>✋</span><small>이동</small></button>
+    <button type="button" id="mobileUndoBtn"><span>↶</span><small>취소</small></button>
+    <button type="button" id="mobileRedoBtn"><span>↷</span><small>다시</small></button>
+    <button type="button" data-open-sheet="settings"><span>⚙</span><small>정보</small></button>
+  </nav>
+
   <dialog id="circleDialog" class="circle-dialog">
     <form id="circleForm" method="dialog">
       <div class="dialog-head">
@@ -128,6 +148,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="app.js?v=1.2"></script>
+  <script src="app.js?v=1.3"></script>
 </body>
 </html>

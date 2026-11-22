@@ -2,6 +2,7 @@
   const NS = "http://www.w3.org/2000/svg";
   const CELL = 32;
   const STORAGE_KEY = "matto-pattern-studio-v1";
+  const LAYOUT_KEY = "matto-pattern-layout-v1";
   const $ = (id) => document.getElementById(id);
 
   const symbols = {
@@ -32,7 +33,36 @@
   const state = { tab: "crochet", tool: "select", selectedType: null, selectedId: null, items: [], cols: 40, rows: 25, zoom: 1, showGrid: true, snap: true, color: "#3b2e29", scale: 1, history: [], future: [], meta: {}, spacePan: false, circle: null };
   let drag = null;
   let pan = null;
+  let tapCandidate = null;
+  let pinch = null;
+  let suppressTouchTap = false;
+  const activeTouches = new Map();
   let saveTimer;
+
+  function isMobileMode() { return document.body.dataset.uiMode === "mobile"; }
+  function preferredLayout() { return localStorage.getItem(LAYOUT_KEY) || "auto"; }
+  function resolveLayout(mode = preferredLayout()) {
+    if (mode !== "auto") return mode;
+    return window.matchMedia("(max-width: 820px), (pointer: coarse)").matches ? "mobile" : "desktop";
+  }
+  function closeSheets() {
+    document.querySelectorAll(".mobile-sheet.open").forEach((el) => el.classList.remove("open"));
+    $("sheetBackdrop").classList.remove("open");
+    $("sheetBackdrop").setAttribute("aria-hidden", "true");
+  }
+  function applyLayout(mode = preferredLayout()) {
+    $("layoutMode").value = mode;
+    document.body.dataset.uiMode = resolveLayout(mode);
+    closeSheets();
+    requestAnimationFrame(fitCanvas);
+  }
+  function openSheet(name) {
+    if (!isMobileMode()) return;
+    closeSheets();
+    $(`${name}Panel`).classList.add("open");
+    $("sheetBackdrop").classList.add("open");
+    $("sheetBackdrop").setAttribute("aria-hidden", "false");
+  }
 
   function symbolDef(type) { return [...symbols.crochet, ...symbols.knit].find((s) => s.id === type); }
   function makeSvg(tag, attrs = {}) { const el = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k,v)); return el; }
@@ -42,7 +72,7 @@
   function restore(raw) { const data = JSON.parse(raw); state.items = data.items || []; state.cols = data.cols || 40; state.rows = data.rows || 25; syncControls(); render(); scheduleSave(); }
   function undo() { if (!state.history.length) return; state.future.push(snapshot()); restore(state.history.pop()); updateButtons(); }
   function redo() { if (!state.future.length) return; state.history.push(snapshot()); restore(state.future.pop()); updateButtons(); }
-  function updateButtons() { $("undoBtn").disabled = !state.history.length; $("redoBtn").disabled = !state.future.length; const noSelection = !state.selectedId; ["duplicateBtn","rotateBtn","deleteBtn"].forEach(id => $(id).disabled = noSelection); $("circleToolBtn").disabled = state.tab !== "crochet" || !state.selectedType; }
+  function updateButtons() { const noUndo = !state.history.length, noRedo = !state.future.length; $("undoBtn").disabled = noUndo; $("redoBtn").disabled = noRedo; $("mobileUndoBtn").disabled = noUndo; $("mobileRedoBtn").disabled = noRedo; const noSelection = !state.selectedId; ["duplicateBtn","rotateBtn","deleteBtn"].forEach(id => $(id).disabled = noSelection); $("circleToolBtn").disabled = state.tab !== "crochet" || !state.selectedType; }
 
   function renderPalette() {
     const root = $("symbolPalette"); root.innerHTML = "";
@@ -50,7 +80,7 @@
       const btn = document.createElement("button"); btn.className = `symbol-button${state.selectedType === symbol.id ? " selected" : ""}`;
       btn.innerHTML = `<svg viewBox="0 0 40 40" aria-hidden="true">${symbol.icon}</svg><small>${symbol.label}</small>`;
       btn.title = symbol.label;
-      btn.addEventListener("click", () => { state.tool = "place"; state.selectedType = symbol.id; state.selectedId = null; renderPalette(); render(); });
+      btn.addEventListener("click", () => { state.tool = "place"; state.selectedType = symbol.id; state.selectedId = null; renderPalette(); render(); if (isMobileMode()) closeSheets(); });
       root.appendChild(btn);
     });
   }
@@ -71,6 +101,7 @@
     if (selected) { const size = 34 * (selected.scale || 1); selection.appendChild(makeSvg("rect", { class:"symbol-selection", x:selected.x-size/2, y:selected.y-size/2, width:size, height:size, rx:4, fill:"none", stroke:"#a6534d", "stroke-width":2, "stroke-dasharray":"5 3" })); }
     $("symbolCount").textContent = `기호 ${state.items.length}개`; $("canvasSizeLabel").textContent = `${state.cols} × ${state.rows}칸`; $("zoomValue").textContent = `${Math.round(state.zoom*100)}%`;
     $("selectToolBtn").classList.toggle("active-tool", state.tool === "select"); $("panToolBtn").classList.toggle("active-tool", state.tool === "pan"); $("circleToolBtn").classList.toggle("active-tool", state.tool === "circle");
+    $("mobileSelectBtn").classList.toggle("active-tool", state.tool === "select"); $("mobilePanBtn").classList.toggle("active-tool", state.tool === "pan");
     $("canvasViewport").classList.toggle("pan-mode", state.tool === "pan" || state.spacePan); $("canvasViewport").classList.toggle("circle-mode", state.tool === "circle"); $("toolHint").textContent = state.tool === "pan" ? "✋ 끌어서 화면 이동" : state.tool === "circle" ? "◯ 원의 중심점을 눌러 배치" : state.tool === "place" ? "＋ 격자를 눌러 기호 배치" : "↖ 기호 선택·이동"; updateButtons();
   }
 
@@ -124,26 +155,65 @@
   $("patternCanvas").addEventListener("pointerdown", (evt) => {
     if(state.tool === "pan" || state.spacePan || evt.button === 1) return;
     const item=itemFromTarget(evt.target), point=svgPoint(evt);
+    if (isMobileMode() && evt.pointerType === "touch" && (state.tool === "circle" || (state.tool === "place" && state.selectedType))) {
+      tapCandidate = { pointerId:evt.pointerId, startX:evt.clientX, startY:evt.clientY, point, action:state.tool };
+      $("patternCanvas").setPointerCapture(evt.pointerId); return;
+    }
     if(state.tool==="circle"){addCircle(point);return}
     if(state.tool==="place"&&state.selectedType){addItem(point);return}
-    if(item){state.selectedId=item.id;drag={id:item.id,start:point,ox:item.x,oy:item.y};$("patternCanvas").setPointerCapture(evt.pointerId)}else state.selectedId=null;render();
+    if(item){state.selectedId=item.id;drag={id:item.id,start:point,ox:item.x,oy:item.y,pointerId:evt.pointerId};$("patternCanvas").setPointerCapture(evt.pointerId)}else state.selectedId=null;render();
   });
-  $("patternCanvas").addEventListener("pointermove", (evt)=>{if(!drag)return;const item=state.items.find(i=>i.id===drag.id),p=svgPoint(evt);item.x=Math.max(0,Math.min(state.cols*CELL,drag.ox+p.x-drag.start.x));item.y=Math.max(0,Math.min(state.rows*CELL,drag.oy+p.y-drag.start.y));render()});
-  $("patternCanvas").addEventListener("pointerup", ()=>{if(drag){state.history.push(JSON.stringify({items:state.items.map(i=>i.id===drag.id?{...i,x:drag.ox,y:drag.oy}:i),cols:state.cols,rows:state.rows}));state.future=[];drag=null;scheduleSave();updateButtons()}});
+  $("patternCanvas").addEventListener("pointermove", (evt)=>{
+    if(tapCandidate?.pointerId===evt.pointerId && Math.hypot(evt.clientX-tapCandidate.startX,evt.clientY-tapCandidate.startY)>8) tapCandidate=null;
+    if(!drag || drag.pointerId!==evt.pointerId || suppressTouchTap)return;
+    const item=state.items.find(i=>i.id===drag.id),p=svgPoint(evt);item.x=Math.max(0,Math.min(state.cols*CELL,drag.ox+p.x-drag.start.x));item.y=Math.max(0,Math.min(state.rows*CELL,drag.oy+p.y-drag.start.y));render()
+  });
+  function endCanvasPointer(evt){
+    if(tapCandidate?.pointerId===evt.pointerId){const candidate=tapCandidate;tapCandidate=null;if(!suppressTouchTap){candidate.action==="circle"?addCircle(candidate.point):addItem(candidate.point)}}
+    if(drag?.pointerId===evt.pointerId){if(!suppressTouchTap){state.history.push(JSON.stringify({items:state.items.map(i=>i.id===drag.id?{...i,x:drag.ox,y:drag.oy}:i),cols:state.cols,rows:state.rows}));state.future=[];scheduleSave();updateButtons()}drag=null}
+  }
+  $("patternCanvas").addEventListener("pointerup",endCanvasPointer); $("patternCanvas").addEventListener("pointercancel",endCanvasPointer);
 
   $("canvasViewport").addEventListener("pointerdown", (evt) => {
+    if(isMobileMode() && evt.pointerType==="touch"){
+      activeTouches.set(evt.pointerId,{x:evt.clientX,y:evt.clientY});
+      if(activeTouches.size===2){
+        evt.preventDefault(); evt.stopPropagation(); suppressTouchTap=true; tapCandidate=null;
+        if(drag){const item=state.items.find(i=>i.id===drag.id);if(item){item.x=drag.ox;item.y=drag.oy}drag=null;render()} pan=null; $("canvasViewport").classList.remove("panning");
+        const [a,b]=[...activeTouches.values()]; pinch={distance:Math.hypot(a.x-b.x,a.y-b.y),midX:(a.x+b.x)/2,midY:(a.y+b.y)/2}; return;
+      }
+    }
     if (!(state.tool === "pan" || state.spacePan || evt.button === 1)) return;
     evt.preventDefault(); const viewport = $("canvasViewport"); pan = { pointerId:evt.pointerId, x:evt.clientX, y:evt.clientY, left:viewport.scrollLeft, top:viewport.scrollTop };
     viewport.classList.add("panning"); viewport.setPointerCapture(evt.pointerId);
   }, true);
-  $("canvasViewport").addEventListener("pointermove", (evt) => { if(!pan || pan.pointerId !== evt.pointerId) return; const viewport=$("canvasViewport"); viewport.scrollLeft=pan.left-(evt.clientX-pan.x); viewport.scrollTop=pan.top-(evt.clientY-pan.y); });
+  $("canvasViewport").addEventListener("pointermove", (evt) => {
+    if(activeTouches.has(evt.pointerId)) activeTouches.set(evt.pointerId,{x:evt.clientX,y:evt.clientY});
+    if(pinch && activeTouches.size>=2){
+      evt.preventDefault(); evt.stopPropagation(); const viewport=$("canvasViewport"),rect=viewport.getBoundingClientRect(); const [a,b]=[...activeTouches.values()];
+      const distance=Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)),midX=(a.x+b.x)/2,midY=(a.y+b.y)/2;
+      const target=state.zoom*(distance/pinch.distance); setZoom(target,{x:midX-rect.left,y:midY-rect.top});
+      viewport.scrollLeft-=midX-pinch.midX; viewport.scrollTop-=midY-pinch.midY; pinch={distance,midX,midY}; return;
+    }
+    if(!pan || pan.pointerId !== evt.pointerId) return; const viewport=$("canvasViewport"); viewport.scrollLeft=pan.left-(evt.clientX-pan.x); viewport.scrollTop=pan.top-(evt.clientY-pan.y);
+  },true);
   function endPan(evt){ if(!pan || (evt.pointerId !== undefined && pan.pointerId !== evt.pointerId)) return; pan=null; $("canvasViewport").classList.remove("panning"); }
-  $("canvasViewport").addEventListener("pointerup", endPan); $("canvasViewport").addEventListener("pointercancel", endPan);
+  function endViewportPointer(evt){
+    if(activeTouches.has(evt.pointerId))activeTouches.delete(evt.pointerId); if(activeTouches.size<2)pinch=null; if(activeTouches.size===0)setTimeout(()=>{suppressTouchTap=false},0); endPan(evt);
+  }
+  $("canvasViewport").addEventListener("pointerup", endViewportPointer,true); $("canvasViewport").addEventListener("pointercancel", endViewportPointer,true);
   $("canvasViewport").addEventListener("wheel", (evt) => { if(!(evt.ctrlKey || evt.metaKey)) return; evt.preventDefault(); const rect=$("canvasViewport").getBoundingClientRect(); setZoom(state.zoom + (evt.deltaY < 0 ? .1 : -.1), {x:evt.clientX-rect.left,y:evt.clientY-rect.top}); }, {passive:false});
 
   document.querySelectorAll(".tab").forEach(btn=>btn.addEventListener("click",()=>{state.tab=btn.dataset.tab;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b===btn));renderPalette()}));
   $("selectToolBtn").addEventListener("click",()=>{state.tool="select";state.selectedType=null;renderPalette();render()});
   $("panToolBtn").addEventListener("click",()=>{state.tool="pan";state.selectedType=null;state.selectedId=null;renderPalette();render()});
+  $("mobileSelectBtn").addEventListener("click",()=>$("selectToolBtn").click());
+  $("mobilePanBtn").addEventListener("click",()=>$("panToolBtn").click());
+  $("mobileUndoBtn").addEventListener("click",undo); $("mobileRedoBtn").addEventListener("click",redo);
+  document.querySelectorAll("[data-open-sheet]").forEach(btn=>btn.addEventListener("click",()=>openSheet(btn.dataset.openSheet)));
+  document.querySelectorAll("[data-close-sheet]").forEach(btn=>btn.addEventListener("click",closeSheets));
+  $("sheetBackdrop").addEventListener("click",closeSheets);
+  $("layoutMode").addEventListener("change",e=>{localStorage.setItem(LAYOUT_KEY,e.target.value);applyLayout(e.target.value)});
   $("circleToolBtn").addEventListener("click",()=>{const def=symbolDef(state.selectedType);if(!def||state.tab!=="crochet")return;$("circleSymbolLabel").textContent=def.label;$("circleDialog").showModal()});
   $("circleForm").addEventListener("submit",e=>{e.preventDefault();const count=Math.max(2,Math.min(60,Number($("circleCount").value)||8));const radiusCells=Math.max(1,Math.min(20,Number($("circleRadius").value)||3));const startAngle=Math.max(-360,Math.min(360,Number($("circleAngle").value)||-90));state.circle={count,radiusCells,startAngle,rotateAlongCircle:$("circleRotate").checked};state.tool="circle";state.selectedId=null;$("circleDialog").close();render();toast("도안에서 원의 중심점을 눌러주세요")});
   ["circleCancelBtn","circleCancelX"].forEach(id=>$(id).addEventListener("click",()=>$("circleDialog").close()));
@@ -161,5 +231,7 @@
   document.addEventListener("keydown",e=>{if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName))return;if(e.code==="Space"){e.preventDefault();if(!state.spacePan){state.spacePan=true;render()}return}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if(e.key==="Delete"||e.key==="Backspace")deleteSelected();else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="d"){e.preventDefault();duplicateSelected()}else if(e.key==="Escape"){$("selectToolBtn").click()}else if(e.key==="0")fitCanvas()});
   document.addEventListener("keyup",e=>{if(e.code==="Space"&&state.spacePan){state.spacePan=false;endPan({});render()}}); window.addEventListener("blur",()=>{state.spacePan=false;endPan({});render()});
 
+  const autoLayoutQuery=window.matchMedia("(max-width: 820px), (pointer: coarse)"); autoLayoutQuery.addEventListener?.("change",()=>{if(preferredLayout()==="auto")applyLayout("auto")});
+  applyLayout(preferredLayout());
   const saved=localStorage.getItem(STORAGE_KEY); if(saved){try{applyData(JSON.parse(saved))}catch{render()}}else render(); renderPalette(); updateButtons(); requestAnimationFrame(fitCanvas);
 })();
